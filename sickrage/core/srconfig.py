@@ -51,6 +51,8 @@ class srConfig(object):
         self.ENCRYPTION_VERSION = 0
         self.ENCRYPTION_SECRET = ""
 
+        self.LAST_DB_COMPACT = 0
+
         self.CENSORED_ITEMS = {}
 
         self.USER_AGENT = '({};{};{})'.format(platform.system(), platform.release(), str(uuid.uuid1()))
@@ -160,6 +162,7 @@ class srConfig(object):
         self.TORRENT_METHOD = None
         self.TORRENT_DIR = None
         self.DOWNLOAD_PROPERS = False
+        self.ENABLE_RSS_CACHE = True
         self.PROPER_SEARCHER_INTERVAL = None
         self.ALLOW_HIGH_PRIORITY = False
         self.SAB_FORCED = False
@@ -472,6 +475,7 @@ class srConfig(object):
         defaults['General']['config_version'] = self.CONFIG_VERSION
         defaults['General']['encryption_version'] = int(self.ENCRYPTION_VERSION)
         defaults['General']['encryption_secret'] = self.ENCRYPTION_SECRET
+        defaults['General']['last_db_compact'] = self.LAST_DB_COMPACT
         defaults['General']['git_autoissues'] = int(self.GIT_AUTOISSUES)
         defaults['General']['git_username'] = self.GIT_USERNAME
         defaults['General']['git_password'] = self.GIT_PASSWORD
@@ -515,6 +519,7 @@ class srConfig(object):
         defaults['General']['showupdate_hour'] = int(self.SHOWUPDATE_HOUR)
         defaults['General']['showupdate_stale'] = int(self.SHOWUPDATE_STALE)
         defaults['General']['download_propers'] = int(self.DOWNLOAD_PROPERS)
+        defaults['General']['enable_rss_cache'] = int(self.ENABLE_RSS_CACHE)
         defaults['General']['randomize_providers'] = int(self.RANDOMIZE_PROVIDERS)
         defaults['General']['check_propers_interval'] = self.PROPER_SEARCHER_INTERVAL
         defaults['General']['allow_high_priority'] = int(self.ALLOW_HIGH_PRIORITY)
@@ -1378,6 +1383,9 @@ class srConfig(object):
         sickrage.DEBUG = sickrage.DEBUG or bool(self.check_setting_int('General', 'debug', 0))
         sickrage.DEVELOPER = sickrage.DEVELOPER or bool(self.check_setting_int('General', 'developer', 0))
 
+        # last database compact
+        self.LAST_DB_COMPACT = self.check_setting_int('General', 'last_db_compact', 0)
+
         # logging settings
         self.LOG_NR = self.check_setting_int('General', 'log_nr', 5)
         self.LOG_SIZE = self.check_setting_int('General', 'log_size', 1048576)
@@ -1462,7 +1470,7 @@ class srConfig(object):
         self.FLATTEN_FOLDERS_DEFAULT = bool(
             self.check_setting_int('General', 'flatten_folders_default', 0))
         self.INDEXER_DEFAULT = self.check_setting_int('General', 'indexer_default', 0)
-        self.INDEXER_TIMEOUT = self.check_setting_int('General', 'indexer_timeout', 20)
+        self.INDEXER_TIMEOUT = self.check_setting_int('General', 'indexer_timeout', 120)
         self.ANIME_DEFAULT = bool(self.check_setting_int('General', 'anime_default', 0))
         self.SCENE_DEFAULT = bool(self.check_setting_int('General', 'scene_default', 0))
         self.ARCHIVE_DEFAULT = bool(self.check_setting_int('General', 'archive_default', 0))
@@ -1490,6 +1498,7 @@ class srConfig(object):
         self.NZB_METHOD = self.check_setting_str('General', 'nzb_method', 'blackhole')
         self.TORRENT_METHOD = self.check_setting_str('General', 'torrent_method', 'blackhole')
         self.DOWNLOAD_PROPERS = bool(self.check_setting_int('General', 'download_propers', 1))
+        self.ENABLE_RSS_CACHE = bool(self.check_setting_int('General', 'enable_rss_cache', 1))
         self.PROPER_SEARCHER_INTERVAL = self.check_setting_str('General', 'check_propers_interval',
                                                                'daily')
         self.RANDOMIZE_PROVIDERS = bool(self.check_setting_int('General', 'randomize_providers', 0))
@@ -1920,6 +1929,7 @@ class srConfig(object):
         new_config['General']['config_version'] = self.CONFIG_VERSION
         new_config['General']['encryption_version'] = int(self.ENCRYPTION_VERSION)
         new_config['General']['encryption_secret'] = self.ENCRYPTION_SECRET
+        new_config['General']['last_db_compact'] = self.LAST_DB_COMPACT
         new_config['General']['git_autoissues'] = int(self.GIT_AUTOISSUES)
         new_config['General']['git_username'] = self.GIT_USERNAME
         new_config['General']['git_password'] = self.GIT_PASSWORD
@@ -1963,6 +1973,7 @@ class srConfig(object):
         new_config['General']['showupdate_hour'] = int(self.SHOWUPDATE_HOUR)
         new_config['General']['showupdate_stale'] = int(self.SHOWUPDATE_STALE)
         new_config['General']['download_propers'] = int(self.DOWNLOAD_PROPERS)
+        new_config['General']['enable_rss_cache'] = int(self.ENABLE_RSS_CACHE)
         new_config['General']['randomize_providers'] = int(self.RANDOMIZE_PROVIDERS)
         new_config['General']['check_propers_interval'] = self.PROPER_SEARCHER_INTERVAL
         new_config['General']['allow_high_priority'] = int(self.ALLOW_HIGH_PRIORITY)

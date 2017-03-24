@@ -1,6 +1,28 @@
 # Changelog
 
-- * 0d702c7 - 2017-03-12: NEW Release v8.9.8 Fixed issues with metadata image downloading from theTVDB for season posters/banners as well as banners for shows Images and actor info is parsed only when needed when using theTVDB API 
+- * 12bb7da - 2017-03-24: v8.9.9 
+- * f042119 - 2017-03-24: Fixed issues with startup delays related to compacting main database Fixed issues with conflicting database index class names 
+- * ace751a - 2017-03-24: Removed Tornado async 
+- * db59856 - 2017-03-24: Removed Tornado async 
+- * 6086b26 - 2017-03-17: Updated thetvdb api url 
+- * 1fba2fd - 2017-03-14: TheTVDB API returns error message from response correctly now 
+- * c51217e - 2017-03-14: TheTVDB API code fix for last_updated attrib 
+- * 82e44c3 - 2017-03-14: TheTVDB API code cleanup 
+- * 99a9a4e - 2017-03-14: Added error handler for requests routine in indexer api 
+- * a7d9214 - 2017-03-14: Increased indexer api timeout to 120s 
+- * 9bbf594 - 2017-03-14: Updated TheTVDB API url 
+- * 536a733 - 2017-03-14: Fixed JWT Token auth issues with TheTVDB API 
+- * 5e53d4a - 2017-03-14: Corrected some code violations 
+- * 7c1e6b2 - 2017-03-14: Corrected some code violations 
+- * d80f248 - 2017-03-14: Added alternative url for TheTVDB API 
+- * 67013ec - 2017-03-14: Added cache into TheTVDB API to help reduce number of API calls 
+- * 9eefa4a - 2017-03-13: Small typo fix 
+- * fdab661 - 2017-03-13: Fixed header issue with TheTVDB API Added code to check TheTVDB if a show has updated infomation available before using a cached version 
+- * 5fb41f2 - 2017-03-13: Added option to enable/disable provider RSS updates during searches to help reduce resource usage for smaller devices 
+- * d4061cf - 2017-03-13: Removed misc stale code 
+- * 3edf433 - 2017-03-12: Removed startup message for daemoning pid 
+- * 13ef587 - 2017-03-12: Fixed args passed when in daemon mode for browser window launching and quite 
+- * 64be91c - 2017-03-12: NEW Release v8.9.8 Fixed issues with metadata image downloading from theTVDB for season posters/banners as well as banners for shows Images and actor info is parsed only when needed when using theTVDB API 
 - * 3e35e35 - 2017-03-11: v8.9.7 
 - * f589c3a - 2017-03-11: Fixed issues with downloading metadata/images from TheTVDB API 
 - * bf1768c - 2017-03-11: Cache directory is now automatically placed in data directory 

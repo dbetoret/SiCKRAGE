@@ -18,10 +18,11 @@
 
 from __future__ import print_function, unicode_literals
 
+import datetime
 import functools
-import getpass
 import os
-import tempfile
+import pickle
+import time
 import urlparse
 
 import imdbpie
@@ -33,17 +34,8 @@ try:
 except ImportError:
     gzip = None
 
-from ui import BaseUI
 from exceptions import (tvdb_error, tvdb_shownotfound, tvdb_seasonnotfound, tvdb_episodenotfound,
-                        tvdb_attributenotfound)
-
-
-class Unauthorized(Exception):
-    pass
-
-
-class APIError(Exception):
-    pass
+                        tvdb_attributenotfound, tvdb_unauthorized)
 
 
 def login_required(f):
@@ -54,7 +46,7 @@ def login_required(f):
 
         try:
             return f(obj, *args, **kwargs)
-        except Unauthorized:
+        except tvdb_unauthorized:
             obj.login(True)
             return f(obj, *args, **kwargs)
 
@@ -72,6 +64,17 @@ def to_lowercase(iterable):
             item = to_lowercase(item)
 
     return iterable
+
+
+class BaseUI:
+    """Default UI, which auto-selects first results
+    """
+
+    def __init__(self, config, log=None):
+        self.config = config
+
+    def selectSeries(self, allSeries, series=None):
+        return allSeries[0]
 
 
 class ShowCache(dict):
@@ -97,11 +100,9 @@ class Show(dict):
         super(Show, self).__init__(**kwargs)
         self.data = {}
 
-    # pickle freindly.
     def __getstate__(self):
         return self.__dict__
 
-    # pickle freindly.
     def __setstate__(self, d):
         self.__dict__.update(d)
 
@@ -133,7 +134,7 @@ class Show(dict):
 
         # Data wasn't found, raise appropriate error
         if isinstance(key, int) or key.isdigit():
-            # Episode number x was not found
+            # Season number x was not found
             raise tvdb_seasonnotfound("Could not find season {}".format(repr(key)))
         else:
             # If it's not numeric, it must be an attribute name, which
@@ -266,10 +267,6 @@ class Actor(dict):
         return "<Actor \"{}\">".format(self.get("name"))
 
 
-class NetworkError(ValueError):
-    pass
-
-
 class Tvdb:
     """Create easy-to-use interface to name of season/episode name
     >>> t = Tvdb()
@@ -278,46 +275,26 @@ class Tvdb:
     """
 
     def __init__(self,
-                 interactive=False,
-                 select_first=False,
                  debug=False,
                  cache=True,
-                 images=False,
-                 actors=False,
                  custom_ui=None,
                  language=None,
                  apikey='F9C450E78D99172E',
-                 useZip=False,
                  dvdorder=False,
                  proxy=None,
                  headers=None):
 
-        if headers is None:
-            headers = {}
+        if headers is None: headers = {}
 
         self.shows = ShowCache()
+        if os.path.isfile(os.path.join(sickrage.DATA_DIR, 'thetvdb.db')):
+            with open(os.path.join(sickrage.DATA_DIR, 'thetvdb.db'), 'rb') as fp:
+                self.shows = pickle.load(fp)
 
-        self.config = {'apikey': apikey, 'debug_enabled': debug, 'custom_ui': custom_ui, 'interactive': interactive,
-                       'select_first': select_first, 'useZip': useZip, 'dvdorder': dvdorder, 'proxy': proxy,
-                       'headers': headers, 'apitoken': None, 'api': {}}
+        self.config = {'apikey': apikey, 'debug_enabled': debug, 'custom_ui': custom_ui, 'cache_enabled': cache,
+                       'dvdorder': dvdorder, 'proxy': proxy, 'apitoken': None, 'api': {}, 'headers': headers}
 
-        if cache is True:
-            self.config['cache_enabled'] = True
-            self.config['cache_location'] = self._getTempDir()
-        elif cache is False:
-            self.config['cache_enabled'] = False
-        elif isinstance(cache, basestring):
-            self.config['cache_enabled'] = True
-            self.config['cache_location'] = cache
-        else:
-            raise ValueError("Invalid value for Cache %r (type was {})".format(cache, type(cache)))
-
-        self.config['headers'].update({'Content-type': 'application/json'})
-
-        self.config['images_enabled'] = images
-        self.config['actors_enabled'] = actors
-
-        # api base urls
+        # api base url
         self.config['api']['base'] = "https://api.thetvdb.com"
 
         # api-v2 urls
@@ -340,27 +317,6 @@ class Tvdb:
         if language not in self.languages:
             self.config['language'] = None
 
-        if self.config['language']:
-            self.config['headers'].update({
-                'Accept-Language': self.config['language']
-            })
-
-    def login(self, refresh=False):
-        try:
-            if refresh and self.config['apitoken']:
-                self.config['apitoken'] = sickrage.srCore.srWebSession.post(
-                    urlparse.urljoin(self.config['api']['base'], self.config['api']['refresh']),
-                    timeout=sickrage.srCore.srConfig.INDEXER_TIMEOUT
-                ).json()['token']
-            else:
-                self.config['apitoken'] = sickrage.srCore.srWebSession.post(
-                    urlparse.urljoin(self.config['api']['base'], self.config['api']['login']),
-                    timeout=sickrage.srCore.srConfig.INDEXER_TIMEOUT,
-                    json={'apikey': self.config['apikey']},
-                ).json()['token']
-        except Exception as e:
-            self.logout()
-
     def logout(self):
         self.config['apitoken'] = None
 
@@ -368,48 +324,45 @@ class Tvdb:
     def logged_in(self):
         return self.config['apitoken'] is not None
 
-    def _getTempDir(self):
-        """Returns the [system temp dir]/thetvdb-u501 (or
-        thetvdb-myuser)
-        """
-        if hasattr(os, 'getuid'):
-            uid = os.getuid()
-        else:
-            # For Windows
-            try:
-                uid = getpass.getuser()
-            except ImportError:
-                return os.path.join(tempfile.gettempdir(), "thetvdb")
+    def login(self, refresh=False):
+        try:
+            if refresh and self.config['apitoken']:
+                self.config['apitoken'] = \
+                    self._request('post', self.config['api']['refresh'])['token']
+            else:
+                self.config['apitoken'] = \
+                    self._request('post', self.config['api']['login'], json={'apikey': self.config['apikey']})['token']
+        except Exception as e:
+            self.logout()
 
-        return os.path.join(tempfile.gettempdir(), "thetvdb-{}".format(uid))
-
-    def _request(self, url, params=None):
-        url = urlparse.urljoin(self.config['api']['base'], url)
+    def _request(self, method, url, **kwargs):
+        self.config['headers'].update({'Content-type': 'application/json'})
 
         if self.config['apitoken']:
             self.config['headers']['authorization'] = 'Bearer {}'.format(self.config['apitoken'])
-
-        sickrage.srCore.srLogger.debug("Retrieving URL {}".format(url))
+        if self.config['language']:
+            self.config['headers'].update({'Accept-Language': self.config['language']})
 
         # get response from theTVDB
-        resp = sickrage.srCore.srWebSession.get(
-            url,
-            cache=self.config['cache_enabled'],
-            headers=self.config['headers'],
-            params=params,
-            timeout=sickrage.srCore.srConfig.INDEXER_TIMEOUT
-        )
+        try:
+            resp = sickrage.srCore.srWebSession.request(
+                method,
+                urlparse.urljoin(self.config['api']['base'], url),
+                cache=self.config['cache_enabled'],
+                headers=self.config['headers'],
+                timeout=sickrage.srCore.srConfig.INDEXER_TIMEOUT,
+                **kwargs
+            )
+        except Exception as e:
+            raise tvdb_error(e.message)
 
         # handle requests exceptions
         if resp.status_code == 401:
-            raise Unauthorized(resp.json()['Error'])
+            raise tvdb_unauthorized(resp.json()['Error'])
         elif resp.status_code >= 400:
-            raise APIError()
+            raise tvdb_error(resp.json()['Error'])
 
-        try:
-            return to_lowercase(resp.json()['data'])
-        except Exception as e:
-            raise tvdb_error(e.message)
+        return to_lowercase(resp.json())
 
     def _setItem(self, sid, seas, ep, attrib, value):
         """Creates a new episode, creating Show(), Season() and
@@ -435,6 +388,9 @@ class Tvdb:
             self.shows[sid][seas][ep] = Episode()
         self.shows[sid][seas][ep][attrib] = value
 
+        with open(os.path.join(sickrage.DATA_DIR, 'thetvdb.db'), 'wb') as fp:
+            pickle.dump(self.shows, fp)
+
     def _setShowData(self, sid, key, value):
         """Sets self.shows[sid] to a new Show instance, or sets the data
         """
@@ -444,9 +400,15 @@ class Tvdb:
 
         self.shows[sid].data[key] = value
 
+        with open(os.path.join(sickrage.DATA_DIR, 'thetvdb.db'), 'wb') as fp:
+            pickle.dump(self.shows, fp)
+
     def _delShow(self, sid):
         if sid in self.shows:
             del self.shows[sid]
+
+        with open(os.path.join(sickrage.DATA_DIR, 'thetvdb.db'), 'wb') as fp:
+            pickle.dump(self.shows, fp)
 
     def _cleanData(self, data):
         """Cleans up strings returned by TheTVDB.com
@@ -464,17 +426,15 @@ class Tvdb:
         and returns the result list
         """
 
-        data = []
-
         if series:
             sickrage.srCore.srLogger.debug("Searching for show by name: {}".format(series))
-            return self._request(self.config['api']['getSeries'].format(name=series))
+            return self._request('get', self.config['api']['getSeries'].format(name=series))['data']
         elif imdbid:
             sickrage.srCore.srLogger.debug("Searching for show by imdbId: {}".format(imdbid))
-            return self._request(self.config['api']['getSeriesIMDB'].format(id=imdbid))
+            return self._request('get', self.config['api']['getSeriesIMDB'].format(id=imdbid))['data']
         elif zap2itid:
             sickrage.srCore.srLogger.debug("Searching for show by zap2itId: {}".format(zap2itid))
-            return self._request(self.config['api']['getSeriesZap2It'].format(id=zap2itid))
+            return self._request('get', self.config['api']['getSeriesZap2It'].format(id=zap2itid))['data']
 
     def _getSeries(self, series):
         """This searches TheTVDB.com for the series name,
@@ -500,8 +460,7 @@ class Tvdb:
 
         ui = BaseUI(config=self.config)
         if self.config['custom_ui'] is not None:
-            CustomUI = self.config['custom_ui']
-            ui = CustomUI(config=self.config)
+            ui = self.config['custom_ui'](config=self.config)
 
         return ui.selectSeries(allSeries, series)
 
@@ -509,13 +468,13 @@ class Tvdb:
     def _parseImages(self, sid):
         sickrage.srCore.srLogger.debug('Getting season images for {}'.format(sid))
 
-        params = self._request(self.config['api']['imagesParams'].format(id=sid))
+        params = self._request('get', self.config['api']['imagesParams'].format(id=sid))['data']
         if not params:
             return
 
         images = {}
         for type in [x['keytype'] for x in params]:
-            imagesEt = self._request(self.config['api']['images'].format(id=sid, type=type))
+            imagesEt = self._request('get', self.config['api']['images'].format(id=sid, type=type))['data']
             if not imagesEt:
                 continue
 
@@ -549,7 +508,7 @@ class Tvdb:
     def _parseActors(self, sid):
         sickrage.srCore.srLogger.debug("Getting actors for {}".format(sid))
 
-        actorsEt = self._request(self.config['api']['actors'].format(id=sid))
+        actorsEt = self._request('get', self.config['api']['actors'].format(id=sid))['data']
         if not actorsEt:
             sickrage.srCore.srLogger.debug('Actors result returned zero')
             return
@@ -574,7 +533,7 @@ class Tvdb:
         self._setShowData(sid, '_actors', cur_actors)
 
     @login_required
-    def _getShowData(self, sid, getEpInfo=False):
+    def _getShowData(self, sid):
         """Takes a series ID, gets the episodes URL and parses the TVDB
         XML file into the shows dict in layout:
         shows[series_id][season_number][episode_number]
@@ -583,7 +542,7 @@ class Tvdb:
         # Parse show information
         sickrage.srCore.srLogger.debug('Getting all series data for {}'.format(sid))
 
-        seriesInfoEt = self._request(self.config['api']['series'].format(id=sid))
+        seriesInfoEt = self._request('get', self.config['api']['series'].format(id=sid))['data']
         if not seriesInfoEt:
             sickrage.srCore.srLogger.debug("[{}]: Series result returned zero".format(sid))
             raise tvdb_error("[{}]: Series result returned zero".format(sid))
@@ -600,69 +559,70 @@ class Tvdb:
 
             self._setShowData(sid, k, v)
 
-        # get episode data
-        if getEpInfo:
-            # Parse images
-            if self.config['images_enabled']: self._parseImages(sid)
+        # Parse images
+        self._parseImages(sid)
 
-            # Parse actors
-            if self.config['actors_enabled']: self._parseActors(sid)
+        # Parse actors
+        self._parseActors(sid)
 
-            # Parse episode data
-            sickrage.srCore.srLogger.debug('Getting all episodes of {}'.format(sid))
+        # Parse episode data
+        sickrage.srCore.srLogger.debug('Getting all episode data for {}'.format(sid))
 
-            p = 1
-            episodes = []
-            while True:
-                try:
-                    data = self._request(self.config['api']['episodes'].format(id=sid), params={'page': p})
-                    episodes += data
-                    p += 1
-                except APIError:
-                    break
+        p = 1
+        episodes = []
+        while True:
+            try:
+                episodes += self._request('get', self.config['api']['episodes'].format(id=sid), params={'page': p})[
+                    'data']
+                p += 1
+            except tvdb_error:
+                break
 
-            if not len(episodes):
-                sickrage.srCore.srLogger.debug('Series results incomplete')
-                return
+        if not len(episodes):
+            sickrage.srCore.srLogger.debug('Series results incomplete')
+            return
 
-            for cur_ep in episodes:
-                try:
-                    use_dvd = False
-                    if self.config['dvdorder']:
-                        sickrage.srCore.srLogger.debug('Using DVD ordering.')
-                        use_dvd = all([cur_ep.get('dvdseason'), cur_ep.get('dvdepisodenumber')])
+        for cur_ep in episodes:
+            try:
+                use_dvd = False
+                if self.config['dvdorder']:
+                    sickrage.srCore.srLogger.debug('Using DVD ordering.')
+                    use_dvd = all([cur_ep.get('dvdseason'), cur_ep.get('dvdepisodenumber')])
 
-                    seasnum, epno = cur_ep.get('airedseason'), cur_ep.get('airedepisodenumber')
-                    if use_dvd:
-                        seasnum, epno = cur_ep.get('dvdseason'), cur_ep.get('dvdepisodenumber')
+                seasnum, epno = cur_ep.get('airedseason'), cur_ep.get('airedepisodenumber')
+                if use_dvd:
+                    seasnum, epno = cur_ep.get('dvdseason'), cur_ep.get('dvdepisodenumber')
 
-                    if seasnum is None or epno is None:
-                        raise Exception
-                except Exception as e:
-                    sickrage.srCore.srLogger.warning("Episode has incomplete season/episode numbers, skipping!")
-                    continue
+                if seasnum is None or epno is None:
+                    raise Exception
+            except Exception as e:
+                sickrage.srCore.srLogger.warning("Episode has incomplete season/episode numbers, skipping!")
+                continue
 
-                seas_no = int(float(seasnum))
-                ep_no = int(float(epno))
+            seas_no = int(float(seasnum))
+            ep_no = int(float(epno))
 
-                for k, v in cur_ep.items():
-                    k = k.lower()
+            for k, v in cur_ep.items():
+                k = k.lower()
 
-                    if v is not None:
-                        if k == 'filename':
-                            v = self.config['api']['imagesPrefix'].format(id=v)
-                        elif isinstance(v, list):
-                            v = '|'.join(v)
-                        else:
-                            v = self._cleanData(v)
+                if v is not None:
+                    if k == 'filename':
+                        v = self.config['api']['imagesPrefix'].format(id=v)
+                    elif isinstance(v, list):
+                        v = '|'.join(v)
+                    else:
+                        v = self._cleanData(v)
 
-                    self._setItem(sid, seas_no, ep_no, k, v)
+                self._setItem(sid, seas_no, ep_no, k, v)
+
+        # set last updated
+        self._setShowData(sid, 'last_updated', long(time.mktime(datetime.datetime.now().timetuple())))
 
         return self.shows[int(sid)]
 
     @login_required
     def updated(self, fromTime):
-        return self._request(self.config['api']['updated'].format(time=fromTime))
+        return self._request('get', self.config['api']['updated'].format(time=fromTime))['data']
 
     @property
     def languages(self):
@@ -670,17 +630,19 @@ class Tvdb:
                 'tr': 21, 'pl': 18, 'fr': 17, 'hr': 31, 'de': 14, 'da': 10, 'fi': 11, 'hu': 19, 'ja': 25, 'he': 24,
                 'ko': 32, 'sv': 8, 'sl': 30}
 
-        # return {l['abbreviation']: l['id'] for l in self._request(self.config['api']['languages'])}
+        # return {l['abbreviation']: l['id'] for l in self._request('get', self.config['api']['languages'])}
 
     def __getitem__(self, key):
-        """
-        Handles: tvdb_instance['seriesname'] calls
-        """
-
         if isinstance(key, (int, long)):
             if key in self.shows:
-                return self.shows[key]
-            return self._getShowData(key, True)
+                try:
+                    fromTime = long(self.shows[key]['last_updated'])
+                    updated_shows = set(d["id"] for d in self.updated(fromTime) or {})
+                    if key not in updated_shows:
+                        return self.shows[key]
+                except:
+                    pass
+            return self._getShowData(key)
 
         selected_series = self._getSeries(key)
         if isinstance(selected_series, dict):
